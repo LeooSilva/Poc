@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>Console CãoBidu · Cobasi POC</title>
+
+<!-- Tailwind via CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Tipografia: Sora para display (redonda, amigável, combina com um mascote pet)
+     e Space Mono para dados/telemetria (números de trecho, status, transcrição) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --amber: #f59e0b;
+    --amber-soft: rgba(245,158,11,0.14);
+    --green: #22c55e;
+    --green-soft: rgba(34,197,94,0.14);
+    --rose: #fb7185;
+    --rose-soft: rgba(251,113,133,0.14);
+  }
+  html,body{ height:100%; background:#0b0f17; }
+  body{ font-family:'Sora', sans-serif; }
+  .mono{ font-family:'Space Mono', monospace; }
+
+  /* Brilho de fundo pulsante — a cor é trocada via classes de estado */
+  .aura{
+    position:absolute; inset:0; margin:auto;
+    width:70vmin; height:70vmin; border-radius:9999px;
+    filter: blur(70px);
+    transition: background 0.6s ease, opacity 0.6s ease;
+    animation: pulse 3.2s ease-in-out infinite;
+  }
+  @keyframes pulse{
+    0%,100%{ transform: scale(1); opacity:0.55; }
+    50%{ transform: scale(1.12); opacity:0.85; }
+  }
+  .aura.state-pronto{ background: radial-gradient(circle, var(--amber) 0%, transparent 70%); }
+  .aura.state-falando{ background: radial-gradient(circle, var(--green) 0%, transparent 70%); }
+  .aura.state-sentado{ background: radial-gradient(circle, var(--rose) 0%, transparent 70%); }
+
+  .emoji-orb{
+    transition: transform 0.4s cubic-bezier(.34,1.56,.64,1), filter 0.4s ease;
+  }
+  .state-falando .emoji-orb{ animation: bob 1.6s ease-in-out infinite; }
+  @keyframes bob{
+    0%,100%{ transform: translateY(0) rotate(-2deg); }
+    50%{ transform: translateY(-6px) rotate(2deg); }
+  }
+  .state-sentado .emoji-orb{ filter: grayscale(0.15) brightness(0.9); }
+
+  .badge-dot{
+    width:8px; height:8px; border-radius:9999px;
+    box-shadow: 0 0 0 0 currentColor;
+    animation: dotpulse 1.6s infinite;
+  }
+  @keyframes dotpulse{
+    0%{ box-shadow: 0 0 0 0 currentColor; opacity:1; }
+    70%{ box-shadow: 0 0 0 8px transparent; opacity:0.4; }
+    100%{ box-shadow: 0 0 0 0 transparent; opacity:1; }
+  }
+
+  .scrollbar-thin::-webkit-scrollbar{ width:6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb{ background:#334155; border-radius:9999px; }
+
+  /* Respeita usuários com preferência por menos movimento */
+  @media (prefers-reduced-motion: reduce){
+    .aura, .state-falando .emoji-orb{ animation: none !important; }
+  }
+
+  .press-btn{ transition: transform .12s ease, filter .12s ease; }
+  .press-btn:active{ transform: scale(0.97); }
+</style>
+</head>
+
+<body class="text-slate-200 antialiased overflow-x-hidden">
+
+  <div class="relative min-h-screen flex flex-col">
+
+    <!-- ===================== HEADER ===================== -->
+    <header class="px-6 pt-6 pb-2 flex items-center justify-between">
+      <div>
+        <p class="mono text-[11px] tracking-[0.3em] text-amber-500/80 uppercase">Cobasi · POC</p>
+        <h1 class="text-lg font-800 font-bold text-slate-50">Console CãoBidu</h1>
+      </div>
+      <button id="btnDebug" title="Mostrar/ocultar transcrição de voz"
+        class="mono text-[10px] px-3 py-1.5 rounded-full border border-slate-700 text-slate-400 hover:text-amber-400 hover:border-amber-500/50 transition">
+        transcrição
+      </button>
+    </header>
+
+    <!-- ===================== PALCO CENTRAL ===================== -->
+    <main class="relative flex-1 flex flex-col items-center justify-center px-6 py-4">
+
+      <div id="aura" class="aura state-pronto pointer-events-none"></div>
+
+      <!-- Orbe / indicador de estado -->
+      <div class="relative z-10 flex flex-col items-center gap-3">
+        <div id="orbWrap" class="relative w-40 h-40 rounded-full flex items-center justify-center
+                    bg-slate-900/70 border border-amber-500/20 shadow-[0_0_60px_-15px_rgba(245,158,11,0.5)] backdrop-blur">
+          <span id="emoji" class="emoji-orb text-7xl select-none">🐶</span>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span id="micDot" class="badge-dot bg-slate-600 text-slate-600"></span>
+          <p id="stateLabel" class="mono text-xs tracking-widest uppercase text-amber-400">Pronto</p>
+        </div>
+      </div>
+
+      <!-- Caixa de texto do trecho atual -->
+      <section class="relative z-10 mt-8 w-full max-w-xl">
+        <div class="rounded-2xl border border-slate-700/70 bg-slate-900/60 backdrop-blur px-5 py-4 shadow-xl">
+          <div class="flex items-center justify-between mb-2">
+            <span id="segIndex" class="mono text-[11px] text-amber-500/90">— / 12</span>
+            <span id="segTitle" class="mono text-[11px] text-slate-400 uppercase tracking-wider">Aguardando comando</span>
+          </div>
+          <p id="segText" class="text-[15px] leading-relaxed text-slate-100 min-h-[4.5rem]">
+            Diga <span class="text-amber-400 font-semibold">"Cão Bidu, apresente"</span> para começar o pitch,
+            ou use os botões de apoio abaixo se o ambiente estiver muito barulhento.
+          </p>
+        </div>
+
+        <!-- Painel de transcrição (oculto por padrão, só para o apresentador debugar o microfone) -->
+        <div id="debugPanel" class="hidden mt-3 rounded-xl border border-slate-800 bg-black/40 px-4 py-3 max-h-32 overflow-y-auto scrollbar-thin">
+          <p class="mono text-[10px] text-slate-500 mb-1 uppercase tracking-wider">Ouvindo (bruto)</p>
+          <p id="transcriptOut" class="mono text-[11px] text-slate-400">—</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- ===================== BOTÕES DE EMERGÊNCIA ===================== -->
+    <footer class="relative z-10 px-6 pb-8 pt-2">
+      <p class="mono text-[10px] text-center text-slate-600 mb-3 tracking-wider">backup manual · invisível para a banca</p>
+      <div class="grid grid-cols-2 gap-3 max-w-xl mx-auto">
+        <button id="btnForcarInicio"
+          class="press-btn rounded-2xl bg-amber-500/10 border border-amber-500/40 text-amber-400 font-semibold py-4 text-sm
+                 hover:bg-amber-500/20 active:bg-amber-500/25">
+          ▶️ Forçar Início
+        </button>
+        <button id="btnForcarSenta"
+          class="press-btn rounded-2xl bg-rose-500/10 border border-rose-500/40 text-rose-300 font-semibold py-4 text-sm
+                 hover:bg-rose-500/20 active:bg-rose-500/25">
+          ⏸️ Forçar Senta
+        </button>
+      </div>
+      <p id="voiceWarning" class="hidden mono text-[10px] text-center text-rose-400 mt-4">
+        Reconhecimento de voz não suportado neste navegador. Use apenas os botões acima (Chrome recomendado).
+      </p>
+    </footer>
+  </div>
+
+<script>
+/* =====================================================================
+   CÃOBIDU — CONSOLE DE APRESENTAÇÃO POR VOZ (POC COBASI)
+   ---------------------------------------------------------------------
+   Arquitetura de estados:
+     'pronto'   -> parado, aguardando comando de início
+     'falando'  -> narrando o roteiro, trecho a trecho
+     'sentado'  -> pausado, ouvindo apenas comandos de retomada ou
+                   perguntas da banca sobre benefício/vantagem
+   O reconhecimento de voz roda em modo contínuo o tempo todo (mesmo
+   durante a fala) para permitir a interrupção instantânea via "senta".
+   ===================================================================== */
+
+// ---------- 1. ROTEIRO ----------
+const roteiro = [
+  { titulo: "Introdução",
+    texto: "Au au! Que alegria estar aqui com esses humanos incríveis da banca! Eu sou o Cão Bidu, o novo agente conversacional parceirinho da Cobasi! Hoje vou guiar vocês pela nossa nova experiência cósmica nascida nas estrelas!" },
+  { titulo: "Entrada",
+    texto: "Au au! Tudo começa quando o tutor passeia pelas redes sociais da Cobasi ou aponta o focinho do celular para um QR Code bem bonito nas nossas lojas físicas! É a entrada perfeita para o universo digital!" },
+  { titulo: "Apresentação do Personagem",
+    texto: "Assim que entra, eu apareço todo feliz para receber o tutor! Nada de robô durão, eu me apresento como um cãozinho influenciador jovem, animado e pronto para espalhar boas energias cósmicas!" },
+  { titulo: "Menu Principal",
+    texto: "Cãobinado a recepção, o tutor chega ao nosso Menu Principal! Aqui as patinhas dele encontram três opções super legais, mas a estrela do show é a primeira: Descobrir o Signo do pet!" },
+  { titulo: "Coleta de Dados",
+    texto: "Com a opção escolhida, começamos a coleta de dados de forma leve. Eu pergunto o nome do tutor humano e o nome do peludinho parceirinho. Tudo muito rápido e simpático!" },
+  { titulo: "Quiz",
+    texto: "Até porque agora o rabinho vai abanar! Começamos um quiz de personalidade super divertido para entender o comportamento do pet. Ele é mais calmo e comilão ou elétrico e destrói chinelos? Os astros querem saber!" },
+  { titulo: "Foto do Pet",
+    texto: "Au au! Para fechar com chave de ouro, eu peço para o tutor enviar uma foto bem bonita do seu pet. É aqui que a mágica visual acontece!" },
+  { titulo: "Descoberta do Signo",
+    texto: "Aí o Universo trabalha! Baseado nas respostas do quiz, eu descubro o signo perfeito para o comportamento daquele pet! É puro entretenimento e conexão emocional!" },
+  { titulo: "Geração da Arte",
+    texto: "Olha que fofura: o sistema gera uma arte totalmente personalizada! Ela junta a foto do pet enviada pelo tutor, elementos visuais do signo astrológico e toda a identidade visual linda da Cobasi!" },
+  { titulo: "Compartilhamento",
+    texto: "Com uma arte linda dessas, o tutor não resiste! Ele compartilha espontaneamente nas suas redes sociais para mostrar para os aumigos. Isso fortalece o branding da Cobasi de forma orgânica e viral!" },
+  { titulo: "Cupom",
+    texto: "E como os astros disseram que esse pet merece muito amor, o universo preparou um mimo! Entregamos um cupom de desconto especial para ser usado na Cobasi, trazendo o tutor para dentro das lojas!" },
+  { titulo: "Encerramento",
+    texto: "Independentemente do signo do peludinho, a Cobasi possui absolutamente tudo o que o pet precisa! Eu encerro o fluxo perguntando com muito carinho se posso ajudar em mais alguma coisa!" },
+];
+
+const respostaBeneficio =
+  "Au au! Excelente pergunta, humano! O nosso projeto cria uma experiência super divertida e personalizada que fortalece o relacionamento entre a Cobasi e os tutores! A geração da arte personalizada incentiva o compartilhamento espontâneo e gera branding orgânico nas redes. E claro, o cupom final atrai o tutor de volta para a Cobasi, convertendo engajamento em ótimos negócios! Au au! Posso voltar à minha apresentação, aumigos?";
+
+// ---------- 2. ESTADO GLOBAL ----------
+let estado = "pronto";      // 'pronto' | 'falando' | 'sentado'
+let indiceAtual = 0;        // trecho atual do roteiro
+let respondendoPergunta = false; // true enquanto fala a resposta de benefício/vantagem
+let vozesCarregadas = [];
+let vozPtBr = null;
+
+// ---------- 3. ELEMENTOS DA UI ----------
+const el = {
+  aura: document.getElementById('aura'),
+  emoji: document.getElementById('emoji'),
+  stateLabel: document.getElementById('stateLabel'),
+  micDot: document.getElementById('micDot'),
+  segIndex: document.getElementById('segIndex'),
+  segTitle: document.getElementById('segTitle'),
+  segText: document.getElementById('segText'),
+  debugPanel: document.getElementById('debugPanel'),
+  transcriptOut: document.getElementById('transcriptOut'),
+  btnDebug: document.getElementById('btnDebug'),
+  btnForcarInicio: document.getElementById('btnForcarInicio'),
+  btnForcarSenta: document.getElementById('btnForcarSenta'),
+  voiceWarning: document.getElementById('voiceWarning'),
+};
+
+// ---------- 4. RENDERIZAÇÃO DE ESTADO ----------
+function renderEstado() {
+  el.aura.classList.remove('state-pronto', 'state-falando', 'state-sentado');
+  el.aura.classList.add('state-' + estado);
+
+  if (estado === 'pronto') {
+    el.emoji.textContent = '🐶';
+    el.stateLabel.textContent = 'Pronto';
+    el.stateLabel.className = 'mono text-xs tracking-widest uppercase text-amber-400';
+  } else if (estado === 'falando') {
+    el.emoji.textContent = '🐕';
+    el.stateLabel.textContent = 'Falando';
+    el.stateLabel.className = 'mono text-xs tracking-widest uppercase text-green-400';
+  } else if (estado === 'sentado') {
+    el.emoji.textContent = '🦮';
+    el.stateLabel.textContent = 'Sentado · ouvindo';
+    el.stateLabel.className = 'mono text-xs tracking-widest uppercase text-rose-300';
+  }
+}
+
+function renderTrecho() {
+  if (indiceAtual < roteiro.length) {
+    const t = roteiro[indiceAtual];
+    el.segIndex.textContent = `${indiceAtual + 1} / ${roteiro.length}`;
+    el.segTitle.textContent = t.titulo;
+    el.segText.textContent = t.texto;
+  }
+}
+
+function setMicAtivo(ativo) {
+  if (ativo) {
+    el.micDot.className = 'badge-dot bg-green-500 text-green-500';
+  } else {
+    el.micDot.className = 'badge-dot bg-slate-600 text-slate-600';
+  }
+}
+
+// ---------- 5. SÍNTESE DE VOZ (TTS) ----------
+const synth = window.speechSynthesis;
+
+function carregarVozes() {
+  vozesCarregadas = synth.getVoices();
+  vozPtBr = vozesCarregadas.find(v => v.lang === 'pt-BR') ||
+            vozesCarregadas.find(v => v.lang && v.lang.startsWith('pt')) ||
+            null;
+}
+carregarVozes();
+if (synth.onvoiceschanged !== undefined) {
+  synth.onvoiceschanged = carregarVozes;
+}
+
+function falar(texto, aoTerminar) {
+  synth.cancel(); // garante que não haja fala anterior enfileirada
+  const utter = new SpeechSynthesisUtterance(texto);
+  utter.lang = 'pt-BR';
+  if (vozPtBr) utter.voice = vozPtBr;
+  utter.rate = 0.92;   // fala levemente mais lenta, com pausas naturais
+  utter.pitch = 1.1;   // tom mais jovem/animado
+  utter.volume = 1;
+
+  utter.onend = () => {
+    if (aoTerminar) aoTerminar();
+  };
+  utter.onerror = () => {
+    if (aoTerminar) aoTerminar();
+  };
+
+  synth.speak(utter);
+}
+
+// ---------- 6. MOTOR DO ROTEIRO (ESTADO "FALANDO") ----------
+function iniciarApresentacao(desdeIndice = 0) {
+  indiceAtual = desdeIndice;
+  estado = 'falando';
+  respondendoPergunta = false;
+  renderEstado();
+  falarProximoTrecho();
+}
+
+function falarProximoTrecho() {
+  if (estado !== 'falando') return; // foi interrompido nesse meio tempo
+  if (indiceAtual >= roteiro.length) {
+    estado = 'pronto';
+    renderEstado();
+    return;
+  }
+  renderTrecho();
+  falar(roteiro[indiceAtual].texto, () => {
+    if (estado !== 'falando') return; // pausado durante a fala
+    // pausa natural de 2s entre os trechos
+    setTimeout(() => {
+      if (estado !== 'falando') return;
+      indiceAtual += 1;
+      falarProximoTrecho();
+    }, 2000);
+  });
+}
+
+function pausarApresentacao() {
+  synth.cancel();
+  estado = 'sentado';
+  respondendoPergunta = false;
+  renderEstado();
+  // silêncio absoluto: nenhuma fala de confirmação, só o feedback visual
+}
+
+function retomarApresentacao() {
+  if (estado !== 'sentado') return;
+  estado = 'falando';
+  renderEstado();
+  falar('Retomando... au au!', () => {
+    if (estado !== 'falando') return;
+    falarProximoTrecho(); // continua exatamente do início do trecho interrompido
+  });
+}
+
+function responderPerguntaBeneficio() {
+  if (estado !== 'sentado' || respondendoPergunta) return;
+  respondendoPergunta = true;
+  el.segTitle.textContent = 'Pergunta da banca';
+  el.segText.textContent = respostaBeneficio;
+  falar(respostaBeneficio, () => {
+    respondendoPergunta = false;
+    // permanece em "sentado", aguardando "pode voltar" para retomar o pitch
+    renderTrecho();
+  });
+}
+
+// ---------- 7. RECONHECIMENTO DE VOZ (STT) ----------
+const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let reconhecimentoDeveRodar = false;
+
+function normalizar(txt) {
+  return txt
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // remove acentos
+}
+
+function processarTranscricao(textoFinal) {
+  const t = normalizar(textoFinal);
+  el.transcriptOut.textContent = textoFinal;
+
+  const dizGatilhoInicio = t.includes('cao bidu, apresente') || t.includes('cao bidu apresente') || t.includes('apresente o projeto');
+  const dizGatilhoSenta = t.includes('cao bidu, senta') || t.includes('cao bidu senta') || t.includes('cao bidu, pare') || t.includes('cao bidu pare');
+  const dizRetomar = t.includes('pode voltar') || t.includes('pode continuar') || t.includes('retomar');
+  const dizPergunta = t.includes('beneficio') || t.includes('vantagem') || t.includes('por que fazer');
+
+  // "senta"/"pare" tem prioridade máxima e funciona em qualquer estado
+  if (dizGatilhoSenta && estado === 'falando') {
+    pausarApresentacao();
+    return;
+  }
+
+  if (estado === 'pronto' && dizGatilhoInicio) {
+    iniciarApresentacao(0);
+    return;
+  }
+
+  if (estado === 'sentado') {
+    if (dizPergunta && !respondendoPergunta) {
+      responderPerguntaBeneficio();
+      return;
+    }
+    if (dizRetomar) {
+      retomarApresentacao();
+      return;
+    }
+  }
+}
+
+function iniciarReconhecimento() {
+  if (!SpeechRecognitionAPI) {
+    el.voiceWarning.classList.remove('hidden');
+    return;
+  }
+  reconhecimentoDeveRodar = true;
+  recognition = new SpeechRecognitionAPI();
+  recognition.lang = 'pt-BR';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onstart = () => setMicAtivo(true);
+  recognition.onend = () => {
+    setMicAtivo(false);
+    // o navegador encerra o reconhecimento após silêncio; reinicia automaticamente
+    // para manter a "escuta contínua" descrita na especificação
+    if (reconhecimentoDeveRodar) {
+      try { recognition.start(); } catch (e) { /* já iniciado, ignora */ }
+    }
+  };
+  recognition.onerror = () => {
+    // erros de rede/permissão não devem travar o console; tenta retomar
+    if (reconhecimentoDeveRodar) {
+      try { recognition.start(); } catch (e) { /* ignora */ }
+    }
+  };
+
+  recognition.onresult = (event) => {
+    let textoFinal = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const resultado = event.results[i];
+      el.transcriptOut.textContent = resultado[0].transcript;
+      if (resultado.isFinal) {
+        textoFinal += resultado[0].transcript + ' ';
+      }
+    }
+    if (textoFinal.trim()) {
+      processarTranscricao(textoFinal.trim());
+    }
+  };
+
+  try { recognition.start(); } catch (e) { /* alguns navegadores lançam se já ativo */ }
+}
+
+// ---------- 8. BOTÕES DE EMERGÊNCIA (BACKUP MANUAL) ----------
+el.btnForcarInicio.addEventListener('click', () => {
+  if (estado === 'sentado') {
+    retomarApresentacao();
+  } else if (estado === 'pronto') {
+    iniciarApresentacao(0);
+  }
+});
+
+el.btnForcarSenta.addEventListener('click', () => {
+  if (estado === 'falando') {
+    pausarApresentacao();
+  }
+});
+
+el.btnDebug.addEventListener('click', () => {
+  el.debugPanel.classList.toggle('hidden');
+});
+
+// ---------- 9. INICIALIZAÇÃO ----------
+renderEstado();
+iniciarReconhecimento();
+</script>
+</body>
+</html>
